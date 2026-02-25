@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVG Text Animator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo">SVG<span>/</span>TEXT <span>—</span> ANIMATOR</div>
+    <div class="badge">v1.0 · opentype.js</div>
+  </header>
+
+  <aside>
+    <!-- FONT -->
+    <div>
+      <div class="section-label">01 — Font</div>
+      <div class="font-drop" id="fontDrop">
+        <input type="file" accept=".ttf,.otf,.woff,.woff2" id="fontFile">
+        <span class="drop-icon">⬡</span>
+        <div class="drop-text">Drop .ttf / .otf here<br>or click to browse</div>
+        <div class="drop-name" id="fontName">— no font loaded —</div>
+      </div>
+      <div class="error-msg" id="fontError">Failed to load font. Try a .ttf or .otf file.</div>
+    </div>
+
+    <!-- TEXT -->
+    <div>
+      <div class="section-label">02 — Text</div>
+      <textarea id="textInput" placeholder="Type your text…" rows="3">Hello</textarea>
+    </div>
+
+    <!-- COLOR -->
+    <div>
+      <div class="section-label">03 — Color</div>
+      <div class="color-row" id="colorRow">
+        <div class="color-swatch active" style="background:#ffffff" data-color="#ffffff"></div>
+        <div class="color-swatch" style="background:#c8ff00" data-color="#c8ff00"></div>
+        <div class="color-swatch" style="background:#ff6b35" data-color="#ff6b35"></div>
+        <div class="color-swatch" style="background:#6b9fff" data-color="#6b9fff"></div>
+        <div class="color-swatch" style="background:#ff3366" data-color="#ff3366"></div>
+        <div class="color-swatch" style="background:#ffd700" data-color="#ffd700"></div>
+        <div class="color-custom" title="Custom color">
+          <span class="plus">+</span>
+          <input type="color" id="customColor" value="#ffffff">
+        </div>
+      </div>
+    </div>
+
+    <!-- TYPOGRAPHY -->
+    <div>
+      <div class="section-label">04 — Typography</div>
+      <div class="control-row">
+        <label>Font Size <span id="sizeVal">80</span>px</label>
+        <input type="range" id="fontSize" min="20" max="200" value="80">
+      </div>
+      <div class="control-row">
+        <label>Letter Spacing <span id="spacingVal">0</span></label>
+        <input type="range" id="letterSpacing" min="-20" max="100" value="0">
+      </div>
+      <div class="control-row">
+        <label>Stroke Width <span id="strokeWidthVal">6</span></label>
+        <input type="range" id="strokeWidth" min="1" max="30" value="6">
+      </div>
+    </div>
+
+    <!-- ANIMATION -->
+    <div>
+      <div class="section-label">05 — Animation</div>
+      <div class="control-row">
+        <label>Duration per letter <span id="durationVal">0.6</span>s</label>
+        <input type="range" id="animDuration" min="1" max="30" value="6">
+      </div>
+      <div class="control-row">
+        <label>Delay between letters <span id="delayVal">0.08</span>s</label>
+        <input type="range" id="animDelay" min="0" max="20" value="8">
+      </div>
+      <div class="control-row">
+        <label>Easing</label>
+        <select id="easing">
+          <option value="linear">Linear</option>
+          <option value="ease-in">Ease In</option>
+          <option value="ease-out" selected>Ease Out</option>
+          <option value="ease-in-out">Ease In Out</option>
+        </select>
+      </div>
+      <div class="control-row" style="margin-top:10px">
+        <label>Render Mode</label>
+        <div class="stroke-mode-row">
+          <div class="mode-pill active" id="modeMask" onclick="setMode('mask')">Masked Fill</div>
+          <div class="mode-pill" id="modeStroke" onclick="setMode('stroke')">Stroke Only</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" onclick="generate()">▶ Generate</button>
+      <button class="btn-secondary" id="downloadBtn" onclick="downloadSVG()" disabled>↓ SVG</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="preview-header">
+      <div class="preview-tabs">
+        <button class="tab active" onclick="switchTab('preview', this)">Preview</button>
+        <button class="tab" onclick="switchTab('code', this)">SVG Code</button>
+      </div>
+      <button class="replay-btn" onclick="replayAnimation()" id="replayBtn" style="display:none">↺ Replay</button>
+    </div>
+
+    <div class="preview-area" id="previewArea">
+      <div class="preview-placeholder" id="placeholder">
+        <span class="big">✦</span>
+        Load a font, type text<br>and hit Generate
+      </div>
+      <div id="preview-svg-container"></div>
+    </div>
+
+    <div id="code-view">
+      <pre id="codeContent"></pre>
+    </div>
+
+    <div class="status-bar">
+      <div class="stat">Paths: <span id="statPaths">—</span></div>
+      <div class="stat">Viewbox: <span id="statViewbox">—</span></div>
+      <div class="stat">Mode: <span id="statMode">—</span></div>
+      <div class="stat">Est. size: <span id="statSize">—</span></div>
+    </div>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
