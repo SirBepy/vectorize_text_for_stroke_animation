@@ -2,7 +2,10 @@
 let loadedFont = null;
 let currentSVG = "";
 let currentColor = "#ffffff";
-let currentMode = "mask"; // 'mask' | 'stroke'
+let currentMode = "stroke"; // 'stroke' | 'sweep'
+let currentTimingMode = "stagger"; // 'stagger' | 'sequential'
+let currentSVGOnly = "";
+let currentCSSOnly = "";
 
 // ─── FONT LOADING ────────────────────────────────────────────────────
 const fontFile = document.getElementById("fontFile");
@@ -56,8 +59,8 @@ function bindRange(id, displayId, factor = 1, decimals = 0) {
 
 bindRange("fontSize", "sizeVal");
 bindRange("letterSpacing", "spacingVal");
-bindRange("strokeWidth", "strokeWidthVal");
-bindRange("animDuration", "durationVal", 0.1, 1);
+bindRange("strokeWidth", "strokeWidthVal", 1, 1);
+bindRange("drawSpeed", "drawSpeedVal", 1, 0);
 bindRange("animDelay", "delayVal", 0.01, 2);
 
 // ─── COLOR ───────────────────────────────────────────────────────────
@@ -81,10 +84,162 @@ document.getElementById("customColor").addEventListener("input", (e) => {
 // ─── MODE ─────────────────────────────────────────────────────────────
 function setMode(m) {
   currentMode = m;
-  document.getElementById("modeMask").classList.toggle("active", m === "mask");
+  document.getElementById("modeMask").classList.toggle("active", m === "sweep");
   document
     .getElementById("modeStroke")
     .classList.toggle("active", m === "stroke");
+}
+
+// ─── TIMING MODE ──────────────────────────────────────────────────────
+function setTimingMode(m) {
+  currentTimingMode = m;
+  document.getElementById("timingStagger").classList.toggle("active", m === "stagger");
+  document.getElementById("timingSequential").classList.toggle("active", m === "sequential");
+  document.getElementById("delayRow").style.display = m === "stagger" ? "block" : "none";
+}
+
+// ─── PIPELINE HELPERS ───────────────────────────────────────────────────
+function collectGlyphs(text, font, fontSize, letterSpacing) {
+  const scale = fontSize / font.unitsPerEm;
+  const ascender = font.ascender * scale;
+  const baseline = ascender;
+
+  let x = 0;
+  const chars = [];
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === " ") {
+      const spaceGlyph = font.charToGlyph(" ");
+      x +=
+        (spaceGlyph.advanceWidth || font.unitsPerEm * 0.3) * scale +
+        letterSpacing;
+      continue;
+    }
+
+    const glyph = font.charToGlyph(ch);
+    if (!glyph || !glyph.path) {
+      x += fontSize * 0.5 + letterSpacing;
+      continue;
+    }
+
+    const pathData = glyph.getPath(x, baseline, fontSize);
+    const svgPath = pathData.toPathData(3);
+    const bbox = pathData.getBoundingBox();
+    const advanceWidth = (glyph.advanceWidth || font.unitsPerEm * 0.5) * scale;
+
+    chars.push({ ch, pathData: svgPath, bbox, x, advanceWidth });
+    x += advanceWidth + letterSpacing;
+  }
+
+  // sort by x1 in bbox
+  chars.sort((a, b) => a.bbox.x1 - b.bbox.x1);
+  return chars;
+}
+
+function measurePathLengths(chars) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute(
+    "style",
+    "position:absolute;left:-9999px;top:-9999px;visibility:hidden",
+  );
+  document.body.appendChild(svg);
+
+  chars.forEach((c) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", c.pathData);
+    svg.appendChild(path);
+    try {
+      c.pathLength = path.getTotalLength();
+    } catch (e) {
+      c.pathLength = 0;
+    }
+  });
+
+  document.body.removeChild(svg);
+}
+
+function buildStrokeOnlySVG(chars, params) {
+  const { color, strokeWidth, speed, delay, timingMode, minX, minY, renderW, renderH } =
+    params;
+
+  // style block
+  let style = "@keyframes draw { to { stroke-dashoffset: 0; } }\n";
+  let accumulatedDelay = 0;
+  chars.forEach((c, i) => {
+    const len = c.pathLength || 0;
+    const duration = (len / speed).toFixed(3);
+    const animDelaySec = timingMode === "sequential"
+      ? accumulatedDelay.toFixed(3)
+      : (i * delay).toFixed(3);
+    accumulatedDelay += len / speed;
+    style += `.letter-${i} { stroke-dasharray: ${len}; stroke-dashoffset: ${len}; animation: draw ${duration}s linear ${animDelaySec}s forwards; }\n`;
+  });
+
+  // paths
+  let paths = "";
+  chars.forEach((c, i) => {
+    paths += `<path class=\"letter-${i}\" d=\"${c.pathData}\" fill=\"none\" stroke=\"${color}\" stroke-width=\"${strokeWidth}\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>\n`;
+  });
+
+  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"${minX} ${minY} ${renderW} ${renderH}\" width=\"${renderW}\" height=\"${renderH}\">\n  <style>\n${style}  </style>\n${paths}</svg>`;
+  return svg;
+}
+
+function buildSweepRevealSVG(chars, params) {
+  const { color, speed, delay, timingMode, minX, minY, renderW, renderH } =
+    params;
+  const padding = 10;
+
+  // style block
+  let style = "@keyframes sweep { to { stroke-dashoffset: 0; } }\n";
+  let accumulatedDelay = 0;
+  chars.forEach((c, i) => {
+    const bbox = c.bbox;
+    const len = (bbox.x2 - bbox.x1) + padding * 2;
+    const duration = (len / speed).toFixed(3);
+    const animDelaySec = timingMode === "sequential"
+      ? accumulatedDelay.toFixed(3)
+      : (i * delay).toFixed(3);
+    accumulatedDelay += len / speed;
+    style += `.sweep-${i} { stroke-dasharray: ${len}; stroke-dashoffset: ${len}; animation: sweep ${duration}s linear ${animDelaySec}s forwards; }\n`;
+  });
+
+  // defs (masks)
+  let defs = "<defs>\n";
+  chars.forEach((c, i) => {
+    const bbox = c.bbox;
+    const centerY = (bbox.y1 + bbox.y2) / 2;
+    const coverageWidth = (bbox.y2 - bbox.y1) + padding * 2;
+    const lineAttrs = `x1="${bbox.x1 - padding}" y1="${centerY}" x2="${bbox.x2 + padding}" y2="${centerY}"`;
+    defs += `  <mask id="sweep-${i}" maskUnits="userSpaceOnUse">\n`;
+    defs += `    <line class="sweep-${i}" ${lineAttrs} stroke="white" stroke-width="${coverageWidth}" stroke-linecap="square"/>\n`;
+    defs += `  </mask>\n`;
+  });
+  defs += "</defs>\n";
+
+  // paths
+  let paths = "";
+  chars.forEach((c, i) => {
+    paths += `<path d="${c.pathData}" fill="${color}" mask="url(#sweep-${i})"/>\n`;
+  });
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">\n  <style>\n${style}  </style>\n${defs}${paths}</svg>`;
+  return svg;
+}
+
+function splitSVGAndCSS(combinedSVG) {
+  const re = /<style>([\s\S]*?)<\/style>/;
+  const match = combinedSVG.match(re);
+  let css = "";
+  let svgOnly = combinedSVG;
+  if (match) {
+    css = match[1];
+    svgOnly = combinedSVG.replace(re, "");
+  }
+  currentCSSOnly = css;
+  currentSVGOnly = svgOnly;
+  return { svgOnly, cssOnly: css };
 }
 
 // ─── CORE: GENERATE SVG ──────────────────────────────────────────────
@@ -97,54 +252,17 @@ function generate() {
   const letterSpacing = parseInt(
     document.getElementById("letterSpacing").value,
   );
-  const strokeWidth = parseInt(document.getElementById("strokeWidth").value);
-  const duration = (
-    parseInt(document.getElementById("animDuration").value) * 0.1
-  ).toFixed(2);
-  const delay = (
-    parseInt(document.getElementById("animDelay").value) * 0.01
-  ).toFixed(3);
-  const easing = document.getElementById("easing").value;
+  const strokeWidth = parseFloat(document.getElementById("strokeWidth").value);
+  const speed = parseInt(document.getElementById("drawSpeed").value);
+  const delay = parseFloat(
+    (parseInt(document.getElementById("animDelay").value) * 0.01).toFixed(3)
+  );
 
-  // Build glyph path data per character
-  const scale = fontSize / loadedFont.unitsPerEm;
-  const ascender = loadedFont.ascender * scale;
-  const descender = loadedFont.descender * scale;
-  const baseline = ascender;
-
-  // Collect per-char path data
-  let x = 0;
-  const chars = [];
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === " ") {
-      const spaceGlyph = loadedFont.charToGlyph(" ");
-      x +=
-        (spaceGlyph.advanceWidth || loadedFont.unitsPerEm * 0.3) * scale +
-        letterSpacing;
-      continue;
-    }
-
-    const glyph = loadedFont.charToGlyph(ch);
-    if (!glyph || !glyph.path) {
-      x += fontSize * 0.5 + letterSpacing;
-      continue;
-    }
-
-    const pathData = glyph.getPath(x, baseline, fontSize);
-    const svgPath = pathData.toPathData(3);
-    const bbox = pathData.getBoundingBox();
-    const advanceWidth =
-      (glyph.advanceWidth || loadedFont.unitsPerEm * 0.5) * scale;
-
-    chars.push({ ch, pathData: svgPath, bbox, x, advanceWidth });
-    x += advanceWidth + letterSpacing;
-  }
-
+  // collect glyphs, measure paths, build according to mode
+  const chars = collectGlyphs(text, loadedFont, fontSize, letterSpacing);
   if (chars.length === 0) return alert("No renderable characters found.");
 
-  // Viewbox
+  // compute viewbox from bboxes
   const allBboxes = chars.map((c) => c.bbox).filter((b) => b && isFinite(b.x1));
   const minX = Math.min(...allBboxes.map((b) => b.x1)) - 10;
   const maxX = Math.max(...allBboxes.map((b) => b.x2)) + 10;
@@ -156,72 +274,36 @@ function generate() {
   const renderW = Math.max(vbW, 100);
   const renderH = Math.max(vbH, 40);
 
-  const totalDuration =
-    parseFloat(duration) * chars.length +
-    parseFloat(delay) * (chars.length - 1);
-
-  // Build SVG
   let svg = "";
-  const maskStrokeColor = "#ffffff";
 
-  if (currentMode === "mask") {
-    // MASKED FILL approach: text filled below, white stroke mask on top animates
-    const masks = chars
-      .map((c, i) => {
-        const id = `m${i}`;
-        const len = estimatePathLength(c.bbox);
-        const animDelaySec = (i * parseFloat(delay)).toFixed(3);
-        return `    <mask id="${id}">
-      <path class="mask-path" d="${c.pathData}"
-        stroke="${maskStrokeColor}" stroke-width="${strokeWidth * 1.5}"
-        fill="${maskStrokeColor}"
-        stroke-linejoin="round" stroke-linecap="round"
-        style="stroke-dasharray:${len};stroke-dashoffset:${len};animation:draw ${duration}s ${easing} ${animDelaySec}s forwards"/>
-    </mask>`;
-      })
-      .join("\n");
-
-    const filledPaths = chars
-      .map(
-        (c, i) =>
-          `  <path d="${c.pathData}" fill="${currentColor}" mask="url(#m${i})"/>`,
-      )
-      .join("\n");
-
-    svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">
-  <defs>
-${masks}
-  </defs>
-  <style>
-    @keyframes draw {
-      to { stroke-dashoffset: 0; }
-    }
-  </style:src>
-${filledPaths}
-</svg>`;
-  } else {
-    // STROKE ONLY approach: just animate the outline stroke
-    const paths = chars
-      .map((c, i) => {
-        const len = estimatePathLength(c.bbox);
-        const animDelaySec = (i * parseFloat(delay)).toFixed(3);
-        return `  <path d="${c.pathData}" fill="none"
-    stroke="${currentColor}" stroke-width="${strokeWidth}"
-    stroke-linejoin="round" stroke-linecap="round"
-    style="stroke-dasharray:${len};stroke-dashoffset:${len};animation:draw ${duration}s ${easing} ${animDelaySec}s forwards"/>`;
-      })
-      .join("\n");
-
-    svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">
-  <style>
-    @keyframes draw {
-      to { stroke-dashoffset: 0; }
-    }
-  </style>
-${paths}
-</svg>`;
+  if (currentMode === "stroke") {
+    measurePathLengths(chars);
+    svg = buildStrokeOnlySVG(chars, {
+      color: currentColor,
+      strokeWidth,
+      speed,
+      delay,
+      timingMode: currentTimingMode,
+      minX,
+      minY,
+      renderW,
+      renderH,
+    });
+  } else if (currentMode === "sweep") {
+    svg = buildSweepRevealSVG(chars, {
+      color: currentColor,
+      speed,
+      delay,
+      timingMode: currentTimingMode,
+      minX,
+      minY,
+      renderW,
+      renderH,
+    });
   }
 
+  // split out css block
+  splitSVGAndCSS(svg);
   currentSVG = svg;
 
   // Update preview
@@ -230,28 +312,23 @@ ${paths}
   container.innerHTML = svg;
   document.getElementById("replayBtn").style.display = "block";
 
-  // Update code view
-  document.getElementById("codeContent").textContent = formatSVGCode(svg);
+  // code view updates now handled by panels; no direct write here
 
   // Update status
   document.getElementById("statPaths").textContent = chars.length;
   document.getElementById("statViewbox").textContent =
     `${Math.round(renderW)}×${Math.round(renderH)}`;
   document.getElementById("statMode").textContent =
-    currentMode === "mask" ? "Masked Fill" : "Stroke Only";
+    currentMode === "sweep" ? "Sweep Reveal" : "Stroke Only";
   document.getElementById("statSize").textContent =
     `~${(svg.length / 1024).toFixed(1)}kb`;
 
   document.getElementById("downloadBtn").disabled = false;
-}
-
-// Estimate path length from bounding box (good enough for dasharray)
-function estimatePathLength(bbox) {
-  if (!bbox || !isFinite(bbox.x1)) return 2000;
-  const w = Math.abs(bbox.x2 - bbox.x1);
-  const h = Math.abs(bbox.y2 - bbox.y1);
-  // Perimeter approx: 2*(w+h) * 1.5 for curves
-  return Math.round(2 * (w + h) * 2.2);
+  // enable code panel buttons
+  document.getElementById("copySvgBtn").disabled = false;
+  document.getElementById("downloadSvgBtn").disabled = false;
+  document.getElementById("copyCssBtn").disabled = false;
+  document.getElementById("downloadCssBtn").disabled = false;
 }
 
 // ─── REPLAY ──────────────────────────────────────────────────────────
@@ -281,13 +358,17 @@ function switchTab(tab, el) {
       : "none";
   } else {
     previewArea.style.display = "none";
-    codeView.style.display = "block";
+    codeView.style.display = "flex";
     document.getElementById("replayBtn").style.display = "none";
+    const svgCode = document.getElementById("svgCodeContent");
+    const cssCode = document.getElementById("cssCodeContent");
     if (currentSVG) {
-      document.getElementById("codeContent").textContent = currentSVG;
+      svgCode.textContent =
+        currentSVGOnly || "// Generate first to see SVG code";
+      cssCode.textContent = currentCSSOnly || "/* Generate first to see CSS */";
     } else {
-      document.getElementById("codeContent").textContent =
-        "// Generate first to see SVG code";
+      svgCode.textContent = "// Generate first to see SVG code";
+      cssCode.textContent = "/* Generate first to see CSS */";
     }
   }
 }
@@ -315,4 +396,50 @@ document.getElementById("textInput").addEventListener("keydown", (e) => {
     e.preventDefault();
     generate();
   }
+});
+
+// initialize mode UI to match default state
+setMode("stroke");
+setTimingMode("stagger");
+
+// panel button wiring ---------------------------------------------------
+const copySvgBtn = document.getElementById("copySvgBtn");
+const downloadSvgBtn = document.getElementById("downloadSvgBtn");
+const copyCssBtn = document.getElementById("copyCssBtn");
+const downloadCssBtn = document.getElementById("downloadCssBtn");
+
+copySvgBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(currentSVGOnly || "");
+  const orig = copySvgBtn.textContent;
+  copySvgBtn.textContent = "Copied!";
+  setTimeout(() => (copySvgBtn.textContent = orig), 1500);
+});
+
+copyCssBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(currentCSSOnly || "");
+  const orig = copyCssBtn.textContent;
+  copyCssBtn.textContent = "Copied!";
+  setTimeout(() => (copyCssBtn.textContent = orig), 1500);
+});
+
+downloadSvgBtn.addEventListener("click", () => {
+  if (!currentSVGOnly) return;
+  const blob = new Blob([currentSVGOnly], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "animated-text.svg";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+downloadCssBtn.addEventListener("click", () => {
+  if (!currentCSSOnly) return;
+  const blob = new Blob([currentCSSOnly], { type: "text/css" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "animated-text.css";
+  a.click();
+  URL.revokeObjectURL(url);
 });

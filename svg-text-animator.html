@@ -64,8 +64,8 @@
         <input type="range" id="letterSpacing" min="-20" max="100" value="0">
       </div>
       <div class="control-row">
-        <label>Stroke Width <span id="strokeWidthVal">6</span></label>
-        <input type="range" id="strokeWidth" min="1" max="30" value="6">
+        <label>Stroke Width <span id="strokeWidthVal">3.0</span></label>
+        <input type="range" id="strokeWidth" min="0.5" max="30" step="0.1" value="3">
       </div>
     </div>
 
@@ -73,27 +73,25 @@
     <div>
       <div class="section-label">05 — Animation</div>
       <div class="control-row">
-        <label>Duration per letter <span id="durationVal">0.6</span>s</label>
-        <input type="range" id="animDuration" min="1" max="30" value="6">
+        <label>Draw Speed <span id="drawSpeedVal">300</span> px/s</label>
+        <input type="range" id="drawSpeed" min="50" max="2000" value="300" step="10">
       </div>
-      <div class="control-row">
+      <div class="control-row" style="margin-top:10px">
+        <label>Timing Mode</label>
+        <div class="stroke-mode-row">
+          <div class="mode-pill active" id="timingStagger" onclick="setTimingMode('stagger')">Stagger</div>
+          <div class="mode-pill" id="timingSequential" onclick="setTimingMode('sequential')">Sequential</div>
+        </div>
+      </div>
+      <div class="control-row" id="delayRow">
         <label>Delay between letters <span id="delayVal">0.08</span>s</label>
         <input type="range" id="animDelay" min="0" max="20" value="8">
-      </div>
-      <div class="control-row">
-        <label>Easing</label>
-        <select id="easing">
-          <option value="linear">Linear</option>
-          <option value="ease-in">Ease In</option>
-          <option value="ease-out" selected>Ease Out</option>
-          <option value="ease-in-out">Ease In Out</option>
-        </select>
       </div>
       <div class="control-row" style="margin-top:10px">
         <label>Render Mode</label>
         <div class="stroke-mode-row">
-          <div class="mode-pill active" id="modeMask" onclick="setMode('mask')">Masked Fill</div>
-          <div class="mode-pill" id="modeStroke" onclick="setMode('stroke')">Stroke Only</div>
+          <div class="mode-pill" id="modeMask" onclick="setMode('sweep')">Sweep Reveal</div>
+          <div class="mode-pill active" id="modeStroke" onclick="setMode('stroke')">Stroke Only</div>
         </div>
       </div>
     </div>
@@ -122,7 +120,30 @@
     </div>
 
     <div id="code-view">
-      <pre id="codeContent"></pre>
+      <div class="code-panel">
+        <div class="panel-header">
+          <div class="panel-label">SVG Markup</div>
+          <div class="panel-actions">
+            <button class="panel-btn" id="copySvgBtn" disabled>Copy</button>
+            <button class="panel-btn" id="downloadSvgBtn" disabled>↓ .svg</button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <pre id="svgCodeContent">// Generate first to see SVG code</pre>
+        </div>
+      </div>
+      <div class="code-panel">
+        <div class="panel-header">
+          <div class="panel-label">CSS Animation</div>
+          <div class="panel-actions">
+            <button class="panel-btn" id="copyCssBtn" disabled>Copy</button>
+            <button class="panel-btn" id="downloadCssBtn" disabled>↓ .css</button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <pre id="cssCodeContent">/* Generate first to see CSS */</pre>
+        </div>
+      </div>
     </div>
 
     <div class="status-bar">
