@@ -73,14 +73,18 @@
     <div>
       <div class="section-label">05 — Animation</div>
       <div class="control-row">
-        <label>Draw Speed <span id="drawSpeedVal">300</span> px/s</label>
-        <input type="range" id="drawSpeed" min="50" max="2000" value="300" step="10">
+        <label>Draw Speed <span id="drawSpeedVal">800</span> px/s</label>
+        <input type="range" id="drawSpeed" min="50" max="2000" value="800" step="10">
+      </div>
+      <div class="control-row" id="fillSpeedRow">
+        <label>Fill Speed <span id="fillSpeedVal">1.0</span>×</label>
+        <input type="range" id="fillSpeed" min="0.01" max="5" step="0.01" value="1">
       </div>
       <div class="control-row" style="margin-top:10px">
         <label>Timing Mode</label>
         <div class="stroke-mode-row">
-          <div class="mode-pill active" id="timingStagger" onclick="setTimingMode('stagger')">Stagger</div>
-          <div class="mode-pill" id="timingSequential" onclick="setTimingMode('sequential')">Sequential</div>
+          <div class="mode-pill active" id="timingSequential" onclick="setTimingMode('sequential')">Sequential</div>
+          <div class="mode-pill" id="timingStagger" onclick="setTimingMode('stagger')">Stagger</div>
         </div>
       </div>
       <div class="control-row" id="delayRow">

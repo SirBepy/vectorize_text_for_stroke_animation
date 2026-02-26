@@ -62,6 +62,7 @@ bindRange("letterSpacing", "spacingVal");
 bindRange("strokeWidth", "strokeWidthVal", 1, 1);
 bindRange("drawSpeed", "drawSpeedVal", 1, 0);
 bindRange("animDelay", "delayVal", 0.01, 2);
+bindRange("fillSpeed", "fillSpeedVal", 1, 2);
 
 // ─── COLOR ───────────────────────────────────────────────────────────
 document.querySelectorAll(".color-swatch").forEach((sw) => {
@@ -88,17 +89,31 @@ function setMode(m) {
   document
     .getElementById("modeStroke")
     .classList.toggle("active", m === "stroke");
+  document.getElementById("fillSpeedRow").style.display =
+    m === "stroke" ? "block" : "none";
 }
 
 // ─── TIMING MODE ──────────────────────────────────────────────────────
 function setTimingMode(m) {
   currentTimingMode = m;
-  document.getElementById("timingStagger").classList.toggle("active", m === "stagger");
-  document.getElementById("timingSequential").classList.toggle("active", m === "sequential");
-  document.getElementById("delayRow").style.display = m === "stagger" ? "block" : "none";
+  document
+    .getElementById("timingStagger")
+    .classList.toggle("active", m === "stagger");
+  document
+    .getElementById("timingSequential")
+    .classList.toggle("active", m === "sequential");
+  document.getElementById("delayRow").style.display =
+    m === "stagger" ? "block" : "none";
 }
 
 // ─── PIPELINE HELPERS ───────────────────────────────────────────────────
+function splitSubPaths(pathData) {
+  if (!pathData) return [];
+  // Split before each M or m move command — each starts a new sub-path
+  const parts = pathData.trim().split(/(?=[Mm])/);
+  return parts.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
 function collectGlyphs(text, font, fontSize, letterSpacing) {
   const scale = fontSize / font.unitsPerEm;
   const ascender = font.ascender * scale;
@@ -128,7 +143,11 @@ function collectGlyphs(text, font, fontSize, letterSpacing) {
     const bbox = pathData.getBoundingBox();
     const advanceWidth = (glyph.advanceWidth || font.unitsPerEm * 0.5) * scale;
 
-    chars.push({ ch, pathData: svgPath, bbox, x, advanceWidth });
+    const subPaths = splitSubPaths(svgPath).map((pd) => ({
+      pathData: pd,
+      pathLength: 0,
+    }));
+    chars.push({ ch, pathData: svgPath, subPaths, bbox, x, advanceWidth });
     x += advanceWidth + letterSpacing;
   }
 
@@ -146,43 +165,96 @@ function measurePathLengths(chars) {
   document.body.appendChild(svg);
 
   chars.forEach((c) => {
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", c.pathData);
-    svg.appendChild(path);
-    try {
-      c.pathLength = path.getTotalLength();
-    } catch (e) {
-      c.pathLength = 0;
-    }
+    c.subPaths.forEach((sp) => {
+      const path = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path",
+      );
+      path.setAttribute("d", sp.pathData);
+      svg.appendChild(path);
+      try {
+        sp.pathLength = path.getTotalLength();
+      } catch (e) {
+        sp.pathLength = 0;
+      }
+    });
+    c.pathLength = Math.max(...c.subPaths.map((s) => s.pathLength), 0);
   });
 
   document.body.removeChild(svg);
 }
 
 function buildStrokeOnlySVG(chars, params) {
-  const { color, strokeWidth, speed, delay, timingMode, minX, minY, renderW, renderH } =
-    params;
+  const {
+    color,
+    strokeWidth,
+    speed,
+    fillSpeed,
+    delay,
+    timingMode,
+    minX,
+    minY,
+    renderW,
+    renderH,
+  } = params;
 
-  // style block
+  // Sub-paths shorter than this fraction of the letter's longest stroke are "dots"
+  // (diacritics, dots on i/j, punctuation dots, etc.) and are drawn last.
+  const DOT_THRESHOLD = 0.2;
+
+  // Pre-process each letter: sort sub-paths longest→shortest, split into main vs dots.
+  const letterData = chars.map((c) => {
+    const sorted = [...c.subPaths].sort((a, b) => b.pathLength - a.pathLength);
+    const maxLen = sorted[0]?.pathLength || 0;
+    const cutoff = maxLen * DOT_THRESHOLD;
+    // First index where length drops below cutoff = start of dots; -1 means all main.
+    let dotsStart = sorted.findIndex((sp) => sp.pathLength < cutoff);
+    if (dotsStart === -1) dotsStart = sorted.length;
+    const mainLen = sorted
+      .slice(0, dotsStart)
+      .reduce((s, sp) => s + sp.pathLength, 0);
+    return { sorted, dotsStart, mainLen };
+  });
+
+  // Build CSS
   let style = "@keyframes draw { to { stroke-dashoffset: 0; } }\n";
   let accumulatedDelay = 0;
+
   chars.forEach((c, i) => {
-    const len = c.pathLength || 0;
-    const duration = (len / speed).toFixed(3);
-    const animDelaySec = timingMode === "sequential"
-      ? accumulatedDelay.toFixed(3)
-      : (i * delay).toFixed(3);
-    accumulatedDelay += len / speed;
-    style += `.letter-${i} { stroke-dasharray: ${len}; stroke-dashoffset: ${len}; animation: draw ${duration}s linear ${animDelaySec}s forwards; }\n`;
+    const { sorted, dotsStart, mainLen } = letterData[i];
+    const letterBaseDelay =
+      timingMode === "sequential" ? accumulatedDelay : i * delay;
+
+    // Sequential timing advances by sum-of-main-strokes so next letter starts
+    // as soon as the last main stroke finishes (dots draw simultaneously with next letter).
+    if (timingMode === "sequential") accumulatedDelay += mainLen / speed;
+
+    // Main strokes fire one after another (longest first).
+    // Dots use the full main-body duration divided by fillSpeed so the user can tune the bleed.
+    const dotDuration = (mainLen / (speed * fillSpeed)).toFixed(3);
+    let intraDelay = 0;
+    sorted.forEach((sp, j) => {
+      const spLen = sp.pathLength || 0;
+      const isMain = j < dotsStart;
+      const duration = isMain ? (spLen / speed).toFixed(3) : dotDuration;
+      // Dots all start together after the last main stroke finishes.
+      const startDelay = (
+        letterBaseDelay + (isMain ? intraDelay : mainLen / speed)
+      ).toFixed(3);
+      style += `.letter-${i}-sub-${j} { stroke-dasharray: ${spLen}; stroke-dashoffset: ${spLen}; animation: draw ${duration}s linear ${startDelay}s forwards; }\n`;
+      if (isMain) intraDelay += spLen / speed;
+    });
   });
 
-  // paths
+  // Emit paths in sorted order (longest first = drawn underneath; dots on top).
   let paths = "";
   chars.forEach((c, i) => {
-    paths += `<path class=\"letter-${i}\" d=\"${c.pathData}\" fill=\"none\" stroke=\"${color}\" stroke-width=\"${strokeWidth}\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>\n`;
+    letterData[i].sorted.forEach((sp, j) => {
+      paths += `<path class="letter-${i}-sub-${j}" d="${sp.pathData}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+    });
   });
 
-  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"${minX} ${minY} ${renderW} ${renderH}\" width=\"${renderW}\" height=\"${renderH}\">\n  <style>\n${style}  </style>\n${paths}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">\n  <style>\n${style}  </style>\n${paths}</svg>`;
   return svg;
 }
 
@@ -191,40 +263,41 @@ function buildSweepRevealSVG(chars, params) {
     params;
   const padding = 10;
 
-  // style block
-  let style = "@keyframes sweep { to { stroke-dashoffset: 0; } }\n";
+  // Compute per-letter timing (no CSS needed — animation is SMIL inline on the rect)
   let accumulatedDelay = 0;
-  chars.forEach((c, i) => {
+  const timings = chars.map((c, i) => {
     const bbox = c.bbox;
-    const len = (bbox.x2 - bbox.x1) + padding * 2;
-    const duration = (len / speed).toFixed(3);
-    const animDelaySec = timingMode === "sequential"
-      ? accumulatedDelay.toFixed(3)
-      : (i * delay).toFixed(3);
-    accumulatedDelay += len / speed;
-    style += `.sweep-${i} { stroke-dasharray: ${len}; stroke-dashoffset: ${len}; animation: sweep ${duration}s linear ${animDelaySec}s forwards; }\n`;
+    const totalWidth = bbox.x2 - bbox.x1 + padding * 2;
+    const duration = totalWidth / speed;
+    const delayVal = timingMode === "sequential" ? accumulatedDelay : i * delay;
+    accumulatedDelay += duration;
+    return { totalWidth, duration, delayVal };
   });
 
-  // defs (masks)
+  // defs: one clipPath per letter, rect starts at width=0 and grows via SMIL animate.
+  // Using clipPath+SMIL avoids CSS-in-SVG-innerHTML scoping issues that break mask animations.
   let defs = "<defs>\n";
   chars.forEach((c, i) => {
     const bbox = c.bbox;
-    const centerY = (bbox.y1 + bbox.y2) / 2;
-    const coverageWidth = (bbox.y2 - bbox.y1) + padding * 2;
-    const lineAttrs = `x1="${bbox.x1 - padding}" y1="${centerY}" x2="${bbox.x2 + padding}" y2="${centerY}"`;
-    defs += `  <mask id="sweep-${i}" maskUnits="userSpaceOnUse">\n`;
-    defs += `    <line class="sweep-${i}" ${lineAttrs} stroke="white" stroke-width="${coverageWidth}" stroke-linecap="square"/>\n`;
-    defs += `  </mask>\n`;
+    const { totalWidth, duration, delayVal } = timings[i];
+    const x = (bbox.x1 - padding).toFixed(2);
+    const y = (bbox.y1 - padding).toFixed(2);
+    const h = (bbox.y2 - bbox.y1 + padding * 2).toFixed(2);
+    defs += `  <clipPath id="clip-${i}" clipPathUnits="userSpaceOnUse">\n`;
+    defs += `    <rect x="${x}" y="${y}" width="0" height="${h}">\n`;
+    defs += `      <animate attributeName="width" from="0" to="${totalWidth.toFixed(2)}" dur="${duration.toFixed(3)}s" begin="${delayVal.toFixed(3)}s" fill="freeze"/>\n`;
+    defs += `    </rect>\n`;
+    defs += `  </clipPath>\n`;
   });
   defs += "</defs>\n";
 
-  // paths
+  // paths — clip-path reveals each letter from left to right
   let paths = "";
   chars.forEach((c, i) => {
-    paths += `<path d="${c.pathData}" fill="${color}" mask="url(#sweep-${i})"/>\n`;
+    paths += `<path d="${c.pathData}" fill="${color}" clip-path="url(#clip-${i})"/>\n`;
   });
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">\n  <style>\n${style}  </style>\n${defs}${paths}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${renderW} ${renderH}" width="${renderW}" height="${renderH}">\n${defs}${paths}</svg>`;
   return svg;
 }
 
@@ -254,8 +327,9 @@ function generate() {
   );
   const strokeWidth = parseFloat(document.getElementById("strokeWidth").value);
   const speed = parseInt(document.getElementById("drawSpeed").value);
+  const fillSpeed = parseFloat(document.getElementById("fillSpeed").value);
   const delay = parseFloat(
-    (parseInt(document.getElementById("animDelay").value) * 0.01).toFixed(3)
+    (parseInt(document.getElementById("animDelay").value) * 0.01).toFixed(3),
   );
 
   // collect glyphs, measure paths, build according to mode
@@ -282,6 +356,7 @@ function generate() {
       color: currentColor,
       strokeWidth,
       speed,
+      fillSpeed,
       delay,
       timingMode: currentTimingMode,
       minX,
@@ -315,7 +390,11 @@ function generate() {
   // code view updates now handled by panels; no direct write here
 
   // Update status
-  document.getElementById("statPaths").textContent = chars.length;
+  const totalSubPaths = chars.reduce(
+    (sum, c) => sum + (c.subPaths ? c.subPaths.length : 1),
+    0,
+  );
+  document.getElementById("statPaths").textContent = totalSubPaths;
   document.getElementById("statViewbox").textContent =
     `${Math.round(renderW)}×${Math.round(renderH)}`;
   document.getElementById("statMode").textContent =
@@ -365,7 +444,9 @@ function switchTab(tab, el) {
     if (currentSVG) {
       svgCode.textContent =
         currentSVGOnly || "// Generate first to see SVG code";
-      cssCode.textContent = currentCSSOnly || "/* Generate first to see CSS */";
+      cssCode.textContent =
+        currentCSSOnly ||
+        "/* No CSS — animation is embedded in the SVG (SMIL) */";
     } else {
       svgCode.textContent = "// Generate first to see SVG code";
       cssCode.textContent = "/* Generate first to see CSS */";
@@ -400,7 +481,7 @@ document.getElementById("textInput").addEventListener("keydown", (e) => {
 
 // initialize mode UI to match default state
 setMode("stroke");
-setTimingMode("stagger");
+setTimingMode("sequential");
 
 // panel button wiring ---------------------------------------------------
 const copySvgBtn = document.getElementById("copySvgBtn");
