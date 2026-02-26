@@ -265,6 +265,14 @@ input[type="range"]::-webkit-slider-runnable-track {
   pointer-events: none;
 }
 
+.recent-colors-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
 /* ANIMATION SETTINGS */
 select {
   width: 100%;

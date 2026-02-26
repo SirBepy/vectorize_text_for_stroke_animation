@@ -82,6 +82,58 @@ document.getElementById("customColor").addEventListener("input", (e) => {
     .forEach((s) => s.classList.remove("active"));
 });
 
+// Save to recent when the color picker dialog is confirmed (change fires on close)
+document.getElementById("customColor").addEventListener("change", (e) => {
+  saveRecentColor(e.target.value);
+});
+
+// ─── RECENT COLORS ───────────────────────────────────────────────────
+const RECENT_KEY = "svg-animator-recent-colors";
+const MAX_RECENT = 7;
+
+function loadRecentColors() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentColor(hex) {
+  let recent = loadRecentColors();
+  recent = [hex, ...recent.filter((c) => c !== hex)].slice(0, MAX_RECENT);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  renderRecentColors(recent);
+}
+
+function renderRecentColors(recent) {
+  const section = document.getElementById("recentColorsSection");
+  const row = document.getElementById("recentColorsRow");
+  if (!recent || recent.length === 0) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+  row.innerHTML = "";
+  recent.forEach((hex) => {
+    const sw = document.createElement("div");
+    sw.className = "color-swatch";
+    sw.style.background = hex;
+    sw.dataset.color = hex;
+    sw.addEventListener("click", () => {
+      document
+        .querySelectorAll(".color-swatch")
+        .forEach((s) => s.classList.remove("active"));
+      sw.classList.add("active");
+      currentColor = hex;
+    });
+    row.appendChild(sw);
+  });
+}
+
+// Render any saved recent colors on load
+renderRecentColors(loadRecentColors());
+
 // ─── MODE ─────────────────────────────────────────────────────────────
 function setMode(m) {
   currentMode = m;
