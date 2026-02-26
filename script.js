@@ -6,6 +6,7 @@ let currentMode = "stroke"; // 'stroke' | 'sweep'
 let currentTimingMode = "stagger"; // 'stagger' | 'sequential'
 let currentSVGOnly = "";
 let currentCSSOnly = "";
+let stateInitialized = false; // prevents saveState from firing during init
 
 // ─── FONT LOADING ────────────────────────────────────────────────────
 const fontFile = document.getElementById("fontFile");
@@ -72,6 +73,7 @@ document.querySelectorAll(".color-swatch").forEach((sw) => {
       .forEach((s) => s.classList.remove("active"));
     sw.classList.add("active");
     currentColor = sw.dataset.color;
+    saveState();
   });
 });
 
@@ -80,6 +82,7 @@ document.getElementById("customColor").addEventListener("input", (e) => {
   document
     .querySelectorAll(".color-swatch")
     .forEach((s) => s.classList.remove("active"));
+  saveState();
 });
 
 // Save to recent when the color picker dialog is confirmed (change fires on close)
@@ -134,6 +137,72 @@ function renderRecentColors(recent) {
 // Render any saved recent colors on load
 renderRecentColors(loadRecentColors());
 
+// ─── PERSIST STATE ────────────────────────────────────────────────────
+const STATE_KEY = "svg-animator-state";
+
+function saveState() {
+  if (!stateInitialized) return;
+  localStorage.setItem(
+    STATE_KEY,
+    JSON.stringify({
+      text: document.getElementById("textInput").value,
+      color: currentColor,
+      fontSize: document.getElementById("fontSize").value,
+      letterSpacing: document.getElementById("letterSpacing").value,
+      strokeWidth: document.getElementById("strokeWidth").value,
+      drawSpeed: document.getElementById("drawSpeed").value,
+      fillSpeed: document.getElementById("fillSpeed").value,
+      animDelay: document.getElementById("animDelay").value,
+      timingMode: currentTimingMode,
+      renderMode: currentMode,
+    }),
+  );
+}
+
+function loadState() {
+  let state;
+  try {
+    state = JSON.parse(localStorage.getItem(STATE_KEY));
+  } catch {
+    return;
+  }
+  if (!state) return;
+
+  if (state.text !== undefined)
+    document.getElementById("textInput").value = state.text;
+
+  ["fontSize", "letterSpacing", "strokeWidth", "drawSpeed", "fillSpeed", "animDelay"].forEach((id) => {
+    if (state[id] !== undefined) {
+      const el = document.getElementById(id);
+      el.value = state[id];
+      el.dispatchEvent(new Event("input"));
+    }
+  });
+
+  if (state.color) {
+    currentColor = state.color;
+    document.querySelectorAll(".color-swatch").forEach((s) => s.classList.remove("active"));
+    const match = [...document.querySelectorAll(".color-swatch")].find(
+      (s) => s.dataset.color === state.color,
+    );
+    if (match) {
+      match.classList.add("active");
+    } else {
+      // Custom color — update the picker's value so it reflects the saved color
+      document.getElementById("customColor").value = state.color;
+    }
+  }
+
+  if (state.timingMode) setTimingMode(state.timingMode);
+  if (state.renderMode) setMode(state.renderMode);
+}
+
+// Wire up save on all slider and text changes
+["fontSize", "letterSpacing", "strokeWidth", "drawSpeed", "fillSpeed", "animDelay"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", saveState);
+});
+document.getElementById("textInput").addEventListener("input", saveState);
+
 // ─── MODE ─────────────────────────────────────────────────────────────
 function setMode(m) {
   currentMode = m;
@@ -143,6 +212,7 @@ function setMode(m) {
     .classList.toggle("active", m === "stroke");
   document.getElementById("fillSpeedRow").style.display =
     m === "stroke" ? "block" : "none";
+  saveState();
 }
 
 // ─── TIMING MODE ──────────────────────────────────────────────────────
@@ -156,6 +226,7 @@ function setTimingMode(m) {
     .classList.toggle("active", m === "sequential");
   document.getElementById("delayRow").style.display =
     m === "stagger" ? "block" : "none";
+  saveState();
 }
 
 // ─── PIPELINE HELPERS ───────────────────────────────────────────────────
@@ -531,9 +602,11 @@ document.getElementById("textInput").addEventListener("keydown", (e) => {
   }
 });
 
-// initialize mode UI to match default state
+// initialize mode UI to match default state, then restore persisted state
 setMode("stroke");
 setTimingMode("sequential");
+loadState();
+stateInitialized = true;
 
 // panel button wiring ---------------------------------------------------
 const copySvgBtn = document.getElementById("copySvgBtn");
