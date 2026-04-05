@@ -1,0 +1,21 @@
+{
+  "name": "SVG Text Animator",
+  "short_name": "SVG Animator",
+  "description": "Convert text into animated SVG paths with stroke and sweep reveal effects",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#16151f",
+  "theme_color": "#9d7dfc",
+  "icons": [
+    {
+      "src": "assets/images/favicon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/images/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

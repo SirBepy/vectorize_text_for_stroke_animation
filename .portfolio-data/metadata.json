@@ -1,0 +1,14 @@
+{
+  "title": "SVG Text Animator",
+  "shortDescription": "Convert text into animated SVG paths with stroke and sweep reveal effects",
+  "type": "Web",
+  "status": "finished",
+  "languages": ["HTML", "CSS", "JavaScript"],
+  "frameworks": [],
+  "tools": ["opentype.js"],
+  "liveUrl": "https://sirbepy.github.io/vectorize_text_for_stroke_animation/",
+  "mainImage": "screenshot-1.png",
+  "images": ["screenshot-1.png"],
+  "year": 2026,
+  "impressiveness": 4
+}
